@@ -2,7 +2,9 @@
 
 ## Démonstration
 
-https://github.com/heiphaistos44-crypto/SecuScan-AppWeb/raw/main/assets/demo.mp4
+![Apercu](assets/demo.gif)
+
+[▶ Voir la démonstration complète](https://github.com/heiphaistos44-crypto/SecuScan-AppWeb/raw/main/assets/demo.mp4)
 
 
 Version web de [SecuScan](https://github.com/heiphaistos44-crypto/SecuScan) — analyse de sécurité du code (SAST), des secrets et des binaires, en ligne.
