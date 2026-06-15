@@ -2,9 +2,7 @@
 
 ## Démonstration
 
-<video controls width="100%" preload="none">
-  <source src="https://media.heiphaistos.org/videos/secuscan.mp4" type="video/mp4">
-</video>
+<video src="https://media.heiphaistos.org/videos/secuscan.mp4" controls width="100%" preload="none"></video>
 ## Fonctionnement
 
 Uploadez **un fichier** (code source, script, config, binaire PE) **ou un ZIP de projet entier** → analyse récursive → rapport de vulnérabilités classées par sévérité, avec remédiation et hints de faux positifs.
