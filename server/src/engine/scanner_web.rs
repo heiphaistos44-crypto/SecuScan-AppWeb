@@ -80,13 +80,17 @@ fn dispatch(path: &Path, data: &[u8], cfg: &ScanConfig) -> Vec<Vulnerability> {
     vec![]
 }
 
-/// Dispatch avec timeout dur de 10 s (parser bloqué = fichier sauté).
+/// Dispatch avec timeout dur de 10 s et cancel flag (parser bloqué = fichier sauté).
 fn dispatch_timed(path: PathBuf, data: Vec<u8>, cfg: ScanConfig) -> Vec<Vulnerability> {
-    use std::sync::mpsc;
+    use std::sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc};
     use std::time::Duration;
 
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = cancel.clone();
     let (tx, rx) = mpsc::channel::<Vec<Vulnerability>>();
+
     std::thread::spawn(move || {
+        if cancel_clone.load(Ordering::Relaxed) { return; }
         let result = dispatch(&path, &data, &cfg);
         let _ = tx.send(result);
     });
@@ -94,6 +98,7 @@ fn dispatch_timed(path: PathBuf, data: Vec<u8>, cfg: ScanConfig) -> Vec<Vulnerab
     match rx.recv_timeout(Duration::from_secs(10)) {
         Ok(vulns) => vulns,
         Err(_) => {
+            cancel.store(true, Ordering::Relaxed);
             log::warn!("File scan timed out — skipped");
             vec![]
         }

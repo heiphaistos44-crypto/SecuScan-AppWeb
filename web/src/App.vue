@@ -13,6 +13,8 @@ const error = ref<string | null>(null);
 const pendingName = ref("");
 const isDragging = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
+const scanElapsed = ref(0);
+let _scanTimer: ReturnType<typeof setInterval> | null = null;
 
 const search = ref("");
 const activeSev = ref<Record<Severity, boolean>>({
@@ -27,21 +29,29 @@ async function handleFile(f: File) {
   error.value = null;
   result.value = null;
   scanning.value = true;
+  scanElapsed.value = 0;
   pendingName.value = f.name;
+  _scanTimer = setInterval(() => { scanElapsed.value += 1; }, 1000);
   try {
     const form = new FormData();
     form.append("file", f);
     const res = await fetch("/api/scan", { method: "POST", body: form });
     if (!res.ok) {
       if (res.status === 429) throw new Error("Trop de scans — patientez avant de réessayer.");
-      const msg = await res.json().then((j) => j.error).catch(() => undefined);
-      throw new Error(msg ?? `Erreur serveur (${res.status})`);
+      if (res.status >= 500) throw new Error(`Erreur interne du serveur (${res.status}) — réessayez.`);
+      const msg = await res.json().then((j: { error?: string }) => j.error).catch(() => undefined);
+      throw new Error(msg ?? `Erreur réseau (${res.status})`);
     }
     result.value = await res.json();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (e instanceof TypeError && e.message.toLowerCase().includes("fetch")) {
+      error.value = "Erreur réseau — vérifiez votre connexion et réessayez.";
+    } else {
+      error.value = e instanceof Error ? e.message : String(e);
+    }
   } finally {
     scanning.value = false;
+    if (_scanTimer !== null) { clearInterval(_scanTimer); _scanTimer = null; }
   }
 }
 
@@ -123,7 +133,7 @@ const totalFindings = computed(() => result.value?.stats
 
       <div v-if="scanning" class="scanning">
         <div class="spinner"></div>
-        <p>Analyse de <strong>{{ pendingName }}</strong>…</p>
+        <p>Analyse de <strong>{{ pendingName }}</strong>… {{ scanElapsed }}s</p>
         <p class="hint" style="font-size:11px;margin-top:6px">SAST · injections · secrets · crypto · YARA binaire</p>
       </div>
 

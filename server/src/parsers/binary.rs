@@ -1,6 +1,7 @@
 //! Binary parser — PE header analysis, hash computation, YARA scanning.
 
 use goblin::pe::PE;
+use once_cell::sync::Lazy;
 use sha2::{Sha256, Digest};
 use std::path::Path;
 
@@ -148,18 +149,18 @@ fn check_pe_protections(path_str: &str, pe: &PE, data: &[u8]) -> Vec<Vulnerabili
     findings
 }
 
+// ─── YARA compiled rules (compiled once at startup) ──────────────────────────
+
+static COMPILED_YARA_RULES: Lazy<yara_x::Rules> = Lazy::new(|| {
+    let mut compiler = yara_x::Compiler::new();
+    compiler.add_source(YARA_RULES).expect("YARA rules invalides");
+    compiler.build()
+});
+
 // ─── YARA scanning ────────────────────────────────────────────────────────────
 
 fn run_yara(path_str: &str, data: &[u8]) -> Vec<Vulnerability> {
-    use yara_x::Compiler;
-
-    let mut compiler = Compiler::new();
-    if let Err(e) = compiler.add_source(YARA_RULES) {
-        log::warn!("YARA compile error: {e}");
-        return vec![];
-    }
-    let rules   = compiler.build();
-    let mut scanner = yara_x::Scanner::new(&rules);
+    let mut scanner = yara_x::Scanner::new(&*COMPILED_YARA_RULES);
 
     let results = match scanner.scan(data) {
         Ok(r)  => r,

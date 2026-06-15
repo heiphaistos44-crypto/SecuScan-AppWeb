@@ -18,7 +18,7 @@ use std::{
 use anyhow::anyhow;
 use axum::{
     extract::{DefaultBodyLimit, Multipart, State},
-    http::{Request, StatusCode},
+    http::{HeaderValue, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -28,6 +28,7 @@ use tower_governor::{
     governor::GovernorConfigBuilder, key_extractor::KeyExtractor, GovernorError, GovernorLayer,
 };
 use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
     timeout::TimeoutLayer,
 };
@@ -54,7 +55,7 @@ impl KeyExtractor for ClientIpExtractor {
             req.headers().get(name)?.to_str().ok()?.split(',').next()?.trim().parse().ok()
         };
         header_ip("cf-connecting-ip")
-            .or_else(|| header_ip("x-forwarded-for"))
+            .or_else(|| header_ip("x-real-ip"))
             .or_else(|| {
                 req.extensions()
                     .get::<axum::extract::ConnectInfo<SocketAddr>>()
@@ -84,9 +85,7 @@ fn internal(msg: impl Into<String>) -> ApiError {
 struct TempDir(PathBuf);
 impl TempDir {
     fn new() -> std::io::Result<Self> {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let p = std::env::temp_dir().join(format!("secuscan_{ts}_{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("secuscan_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&p)?;
         Ok(TempDir(p))
     }
@@ -101,8 +100,7 @@ impl Drop for TempDir {
 // ─── Détection ZIP ────────────────────────────────────────────────────────────
 
 fn looks_like_zip(bytes: &[u8], name: &str) -> bool {
-    bytes.starts_with(b"PK\x03\x04")
-        && (name.to_lowercase().ends_with(".zip") || bytes.starts_with(b"PK\x03\x04"))
+    bytes.starts_with(b"PK\x03\x04") || name.to_lowercase().ends_with(".zip")
 }
 
 /// Extrait un ZIP dans `dest` avec protections anti zip-slip + anti zip-bomb.
@@ -133,7 +131,9 @@ fn extract_zip_safe(data: &[u8], dest: &Path) -> Result<usize, ApiError> {
             continue;
         }
 
-        total_uncompressed += entry.size();
+        total_uncompressed = total_uncompressed
+            .checked_add(entry.size())
+            .ok_or_else(|| bad_request("Overflow taille ZIP"))?;
         if total_uncompressed > MAX_UNCOMPRESSED {
             return Err(bad_request("Archive trop volumineuse une fois décompressée (zip-bomb ?)"));
         }
@@ -144,7 +144,10 @@ fn extract_zip_safe(data: &[u8], dest: &Path) -> Result<usize, ApiError> {
             continue;
         }
         if let Some(parent) = out_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| internal(format!("mkdir : {e}")))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                tracing::error!("mkdir extraction ZIP : {e}");
+                internal("Erreur serveur interne")
+            })?;
         }
 
         let mut buf = Vec::new();
@@ -153,8 +156,14 @@ fn extract_zip_safe(data: &[u8], dest: &Path) -> Result<usize, ApiError> {
             .by_ref()
             .take(MAX_UNCOMPRESSED)
             .read_to_end(&mut buf)
-            .map_err(|e| internal(format!("Lecture entrée ZIP : {e}")))?;
-        std::fs::write(&out_path, &buf).map_err(|e| internal(format!("Écriture : {e}")))?;
+            .map_err(|e| {
+                tracing::error!("Lecture entrée ZIP : {e}");
+                internal("Erreur serveur interne")
+            })?;
+        std::fs::write(&out_path, &buf).map_err(|e| {
+            tracing::error!("Écriture extraction ZIP : {e}");
+            internal("Erreur serveur interne")
+        })?;
         extracted += 1;
     }
 
@@ -213,7 +222,10 @@ async fn scan(
         .map_err(|_| ApiError(StatusCode::SERVICE_UNAVAILABLE, "Arrêt en cours".into()))?;
 
     let result = tokio::task::spawn_blocking(move || -> Result<models::ScanResult, ApiError> {
-        let tmp = TempDir::new().map_err(|e| internal(format!("Temp dir : {e}")))?;
+        let tmp = TempDir::new().map_err(|e| {
+            tracing::error!("Création répertoire temporaire : {e}");
+            internal("Erreur serveur interne")
+        })?;
         let cfg = ScanConfig::default();
 
         if is_zip {
@@ -225,7 +237,10 @@ async fn scan(
             Ok(scanner_web::scan_tree(tmp.path(), display, cfg))
         } else {
             let file_path = tmp.path().join(&base);
-            std::fs::write(&file_path, &bytes).map_err(|e| internal(format!("Écriture : {e}")))?;
+            std::fs::write(&file_path, &bytes).map_err(|e| {
+                tracing::error!("Écriture fichier temporaire : {e}");
+                internal("Erreur serveur interne")
+            })?;
             Ok(scanner_web::scan_single(&file_path, &base, cfg))
         }
         // tmp supprimé ici (Drop)
@@ -257,9 +272,15 @@ async fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow!("Config rate-limit invalide"))?,
     );
 
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::exact(
+            "https://secuscan-app.heiphaistos.org".parse::<HeaderValue>().unwrap(),
+        ));
+
     let api = Router::new()
         .route("/api/scan", post(scan))
         .route("/api/health", get(health))
+        .layer(cors)
         .layer(GovernorLayer { config: governor_conf })
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))
         .layer(TimeoutLayer::new(Duration::from_secs(180)))

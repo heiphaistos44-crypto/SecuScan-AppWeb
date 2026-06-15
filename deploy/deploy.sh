@@ -23,7 +23,14 @@ cd "$APP_DIR/server"
 cargo build --release
 LOG "Binaire : $APP_DIR/server/target/release/secuscan-server"
 
-# ── 3. PM2 ─────────────────────────────────────────────────────────
+# ── 3. Build frontend ──────────────────────────────────────────────
+LOG "Build frontend Vue..."
+cd "$APP_DIR/web"
+npm ci --prefer-offline
+npm run build
+LOG "Frontend buildé dans $APP_DIR/web/dist"
+
+# ── 4. PM2 ─────────────────────────────────────────────────────────
 cd "$APP_DIR"
 if pm2 describe secuscan >/dev/null 2>&1; then
     LOG "Restart PM2 secuscan..."
@@ -36,6 +43,6 @@ else
     pm2 save
 fi
 
-# ── 4. Vérification ────────────────────────────────────────────────
+# ── 5. Vérification ────────────────────────────────────────────────
 sleep 2
 curl -fsS http://127.0.0.1:3005/api/health && echo "" && LOG "Déploiement OK ✅"

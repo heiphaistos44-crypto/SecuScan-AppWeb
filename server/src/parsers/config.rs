@@ -212,8 +212,13 @@ pub fn scan_config(path: &Path, content: &[u8]) -> Vec<Vulnerability> {
     let path_str = path.to_string_lossy().to_string();
     let mut findings: Vec<Vulnerability> = Vec::new();
 
+    const MAX_MATCHES_PER_RULE: usize = 20;
+
     for rule in get_rules() {
+        let mut rule_count = 0usize;
         for m in rule.pattern.find_iter(text) {
+            if rule_count >= MAX_MATCHES_PER_RULE { break; }
+            rule_count += 1;
             let line_idx = text[..m.start()].chars().filter(|&c| c == '\n').count();
             let snippet  = context_snippet(&lines, line_idx, 1);
             let matched  = m.as_str().chars().take(100).collect::<String>();

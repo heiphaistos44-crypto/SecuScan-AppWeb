@@ -164,7 +164,19 @@ impl Vulnerability {
     }
 
     pub fn with_match(mut self, m: impl Into<String>) -> Self {
-        self.matched_pattern = Some(m.into());
+        let raw: String = m.into();
+        // Tronquer les matches sensibles pour éviter d'exposer des secrets en clair
+        let redacted = match &self.category {
+            VulnCategory::PasswordLeak
+            | VulnCategory::ApiKeyLeak
+            | VulnCategory::HardcodedSecret
+            | VulnCategory::ConnectionStringLeak => {
+                let prefix: String = raw.chars().take(8).collect();
+                format!("{}[REDACTED]", prefix)
+            }
+            _ => raw,
+        };
+        self.matched_pattern = Some(redacted);
         self
     }
 }
