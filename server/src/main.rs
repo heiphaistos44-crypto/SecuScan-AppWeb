@@ -30,7 +30,7 @@ use tower_governor::{
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
-    set_response_header::SetResponseHeaderLayer,
+    set_header::SetResponseHeaderLayer,
     timeout::TimeoutLayer,
 };
 
