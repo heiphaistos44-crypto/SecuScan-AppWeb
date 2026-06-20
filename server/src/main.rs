@@ -248,7 +248,7 @@ async fn scan(
         // tmp supprimé ici (Drop)
     })
     .await
-    .map_err(|e| internal(format!("Tâche interrompue : {e}")))??;
+    .map_err(|e| { tracing::error!("Tâche scan interrompue : {e}"); internal("Erreur serveur interne") })??;
 
     Ok(Json(result).into_response())
 }
@@ -296,6 +296,10 @@ async fn main() -> anyhow::Result<()> {
         .layer(SetResponseHeaderLayer::if_not_present(
             header::X_FRAME_OPTIONS,
             HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
         ))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::REFERRER_POLICY,
