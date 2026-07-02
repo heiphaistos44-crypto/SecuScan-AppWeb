@@ -220,5 +220,6 @@ const totalFindings = computed(() => result.value?.stats
 
   <footer class="footer">
     Analyse statique locale — aucun fichier conservé après le scan (traitement en mémoire, répertoire temporaire supprimé).
+    <a href="https://heiphaistos.org/legal/" target="_blank" rel="noopener noreferrer">Mentions légales</a>
   </footer>
 </template>
